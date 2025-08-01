@@ -3,90 +3,121 @@
 
 #include "wifi.h"
 
-#define STATUS_PIN 4
+#define STATE_PIN 4
 #define BUTTON_PIN 5
 
-#define LOG_D(fmt, ...)   printf_P(PSTR(fmt "\n") , ##__VA_ARGS__);
+#define HEAP_REPORT_INTERVAL 5000 // Interval for heap reporting (ms)
+#define IGNORE_CHANGE_PERIOD 5000 // Time after startup/shutdown to ignore HomeKit inputs (ms)
+#define TARGET_TIMEOUT 60000 // Time to revert target state if not reached (ms)
 
-bool lastStatus;
+// HomeKit Lock States (HAP sections 9.52, 9.56)
+#define PC_ON 0
+#define PC_OFF 1
+#define PC_UNKNOWN 3
+
+// Access HomeKit characteristics defined in homekit_accessory.c
+extern "C" homekit_server_config_t config;
+extern "C" homekit_characteristic_t cha_lock_current_state;
+extern "C" homekit_characteristic_t cha_lock_target_state;
+
+static uint32_t lastHeapMillis = 0;
+static uint32_t lastStateChangeMillis = 0;
+static uint32_t targetSetMillis = 0;
+static uint8_t lastState;
+
+void triggerButtonPress();
+uint8_t getState();
 
 void setup() {
-  pinMode(STATUS_PIN, INPUT);
+  pinMode(STATE_PIN, INPUT);
   pinMode(BUTTON_PIN, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(BUTTON_PIN, LOW);
 
   Serial.begin(115200);
-
   wifi_initialize();
-  homekit_setup();
+
+  cha_lock_target_state.setter = set_state;
+  arduino_homekit_setup(&config);
+
+  uint8_t state = getState();
+  lastState = state;
+  lastStateChangeMillis = millis();
+  targetSetMillis = millis();
+  cha_lock_current_state.value.int_value = state;
+  cha_lock_target_state.value.int_value = state;
+  homekit_characteristic_notify(&cha_lock_current_state, cha_lock_current_state.value);
+  homekit_characteristic_notify(&cha_lock_target_state, cha_lock_target_state.value);
 }
 
 void loop() {
-  digitalWrite(LED_BUILTIN, getStatus() ? LOW : HIGH);
-  homekit_loop();
+  uint8_t currentState = getState();
+  const uint32_t now = millis();
+
+  digitalWrite(LED_BUILTIN, currentState == PC_ON ? LOW : HIGH);
+
+  // If actual state changes, update HomeKit
+  if (currentState != lastState) {
+    Serial.printf("State changed from %d to %d. Notifying HomeKit.\n", lastState, currentState);
+    if (lastState == PC_OFF) {
+      lastStateChangeMillis = now;
+    }
+    lastState = currentState;
+    cha_lock_current_state.value.int_value = currentState;
+    homekit_characteristic_notify(&cha_lock_current_state, cha_lock_current_state.value);
+    cha_lock_target_state.value.int_value = currentState;
+    homekit_characteristic_notify(&cha_lock_target_state, cha_lock_target_state.value);
+  }
+
+  // Timeout if target hasn't been reached
+  if ((cha_lock_target_state.value.int_value != currentState) && (now - targetSetMillis > TARGET_TIMEOUT)) {
+    Serial.println("Target timeout reached. Updating target to current state.");
+    cha_lock_target_state.value.int_value = currentState;
+    homekit_characteristic_notify(&cha_lock_target_state, cha_lock_target_state.value);
+  }
+
+  arduino_homekit_loop();
+  if (now - lastHeapMillis > HEAP_REPORT_INTERVAL) {
+    lastHeapMillis = now;
+    Serial.printf("Free heap: %d, HomeKit clients: %d\n", ESP.getFreeHeap(), arduino_homekit_connected_clients_count());
+  }
+
   delay(10);
 }
 
-bool getStatus() {
-  return !digitalRead(STATUS_PIN);
-}
+void set_state(const homekit_value_t value) {
+  const uint32_t now = millis();
 
-//==============================
-// HomeKit setup and loop
-//==============================
-
-// access your HomeKit characteristics defined in homekit_accessory.h
-extern "C" homekit_server_config_t config;
-extern "C" homekit_characteristic_t cha_switch_on;
-
-static uint32_t next_heap_millis = 0;
-
-//Called when the switch value is changed by iOS Home APP
-void cha_switch_on_setter(const homekit_value_t value) {
-	bool on = value.bool_value;
-	LOG_D("Switch: %s", on ? "ON" : "OFF");
-
-  if (on == getStatus()) {
-    Serial.println("PC already in selected state.");
-  }else {
-    digitalWrite(BUTTON_PIN, HIGH);
-    delay(200);
-    digitalWrite(BUTTON_PIN, LOW);
+  // Ignore input if within ignore window after state change
+  if (now - lastStateChangeMillis < IGNORE_CHANGE_PERIOD) {
+    Serial.println("Ignoring HomeKit input during transition period.");
+    cha_lock_target_state.value.int_value = getState();
+    homekit_characteristic_notify(&cha_lock_target_state, cha_lock_target_state.value);
+    return;
   }
 
-  cha_switch_on.value.bool_value = getStatus();
-	homekit_characteristic_notify(&cha_switch_on, cha_switch_on.value);
-}
+  uint8_t setState = value.int_value;
+  Serial.printf("Set Target State: %s\n", setState == PC_ON ? "ON" : "OFF");
 
-void homekit_setup() {
-	cha_switch_on.setter = cha_switch_on_setter;
-	arduino_homekit_setup(&config);
+  cha_lock_target_state.value.int_value = setState;
+  homekit_characteristic_notify(&cha_lock_target_state, cha_lock_target_state.value);
+  targetSetMillis = now;
 
-  bool status = getStatus();
-  lastStatus = status;
-	cha_switch_on.value.bool_value = status;
-	homekit_characteristic_notify(&cha_switch_on, cha_switch_on.value);
-}
-
-void homekit_loop() {
-
-  bool status = getStatus();
-  if(status != lastStatus) {
-    lastStatus = status;
-    Serial.println("Status changed. Updating...");
-    cha_switch_on.value.bool_value = status;
-	  homekit_characteristic_notify(&cha_switch_on, cha_switch_on.value);
+  if (setState == getState()) {
+    Serial.println("PC already in desired state.");
+    return;
   }
 
-	arduino_homekit_loop();
-	const uint32_t t = millis();
-	if (t > next_heap_millis) {
-    cha_switch_on.value.bool_value = getStatus();
-	  homekit_characteristic_notify(&cha_switch_on, cha_switch_on.value);
-		// show heap info every 5 seconds
-		next_heap_millis = t + 5 * 1000;
-		LOG_D("Free heap: %d, HomeKit clients: %d",
-				ESP.getFreeHeap(), arduino_homekit_connected_clients_count());
+  triggerButtonPress();
+}
 
-	}
+void triggerButtonPress() {
+  Serial.println("Triggering button press");
+  digitalWrite(BUTTON_PIN, HIGH);
+  delay(100);
+  digitalWrite(BUTTON_PIN, LOW);
+}
+
+uint8_t getState() {
+  return digitalRead(STATE_PIN) == LOW ? PC_ON : PC_OFF;
 }
