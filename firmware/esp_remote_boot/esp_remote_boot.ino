@@ -2,6 +2,7 @@
 #include <arduino_homekit_server.h>
 
 #include "wifi.h"
+#include "io.h"
 
 #define STATE_PIN 4
 #define BUTTON_PIN 5
@@ -35,6 +36,8 @@ void setup() {
   digitalWrite(BUTTON_PIN, LOW);
 
   Serial.begin(115200);
+
+  io_setup();
   wifi_initialize();
 
   cha_lock_target_state.setter = set_state;
@@ -53,6 +56,8 @@ void setup() {
 void loop() {
   uint8_t currentState = getState();
   const uint32_t now = millis();
+
+  io_loop();
 
   digitalWrite(LED_BUILTIN, currentState == PC_ON ? LOW : HIGH);
 

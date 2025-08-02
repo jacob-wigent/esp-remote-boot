@@ -8,10 +8,15 @@
 #include <EEPROM.h>
 
 #include "config_webpage.h"
+#include "io.h"
 
 #define EEPROM_START_ADDRESS 1408      // HomeKit library uses [0, 1408)
 #define EEPROM_CONFIG_SIGNATURE 0x42   // Arbitrary byte to indicate stored config
 #define EEPROM_TOTAL_SIZE (EEPROM_START_ADDRESS + sizeof(Configuration) + sizeof(byte))
+
+#define DEVICE_SETUP        0
+#define DEVICE_CONNECTING   1
+#define DEVICE_OPERATIONAL  2
 
 enum OperationMode : uint8_t {
   OP_MODE_HTTP = 0,
@@ -69,7 +74,10 @@ bool tryConnectWifi() {
       return true;
     }
 		Serial.print(".");
-    delay(1000);
+    delay(150);
+    io_set_led(true);
+    delay(150);
+    io_set_led(false);
 	}
   Serial.println("\nWiFi connection timeout.");
   return false;
@@ -140,9 +148,19 @@ void handleConfigSetup() {
   Serial.println("Captive portal started at http://192.168.4.1");
 
   // Main portal loop
+  uint32_t lastBlink = millis();
+  bool ledState = false;
   while (true) {
     dnsServer.processNextRequest();
     server.handleClient();
+
+    uint32_t now = millis();
+    if (now - lastBlink >= 1000) {
+      ledState = !ledState;
+      io_set_led(ledState);
+      lastBlink = now;
+    }
+
     delay(1);
   }
 }
@@ -155,6 +173,7 @@ void wifi_initialize() {
   } else {
     handleConfigSetup();
   }
+  io_set_led(true);
 }
 
 #endif
