@@ -10,7 +10,7 @@
 #define DEVICE_CONNECTING   1
 #define DEVICE_OPERATIONAL  2
 
-#define LED_PIN 14
+#define LED_PIN 2
 #define IO_BUTTON_PIN 12
 
 const uint16_t debounceDelay = 100; // ms

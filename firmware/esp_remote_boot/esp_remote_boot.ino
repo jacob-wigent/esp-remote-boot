@@ -4,8 +4,8 @@
 #include "wifi.h"
 #include "io.h"
 
-#define STATE_PIN 4
-#define BUTTON_PIN 5
+#define STATE_PIN 0
+#define BUTTON_PIN 14
 
 #define HEAP_REPORT_INTERVAL 5000 // Interval for heap reporting (ms)
 #define IGNORE_CHANGE_PERIOD 5000 // Time after startup/shutdown to ignore HomeKit inputs (ms)
@@ -59,7 +59,8 @@ void loop() {
 
   io_loop();
 
-  digitalWrite(LED_BUILTIN, currentState == PC_ON ? LOW : HIGH);
+  // digitalWrite(LED_BUILTIN, currentState == PC_ON ? LOW : HIGH);
+  // Serial.println(currentState);
 
   // If actual state changes, update HomeKit
   if (currentState != lastState) {
