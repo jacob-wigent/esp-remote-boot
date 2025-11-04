@@ -35,7 +35,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     <h1>PC Switch Setup</h1>
     <form method="POST" action="/save">
       <input type="text" name="ssid" placeholder="WiFi SSID" required><br>
-      <input type="password" name="password" placeholder="WiFi Password" required><br>
+      <input type="password" name="password" placeholder="WiFi Password"><br>
 
       <label>Operation Mode:</label>
       <div class="radio-group">

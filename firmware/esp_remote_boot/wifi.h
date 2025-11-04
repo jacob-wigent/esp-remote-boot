@@ -166,6 +166,8 @@ void handleConfigSetup() {
 }
 
 void wifi_initialize() {
+  Serial.print("ESP8266 MAC Address: ");
+  Serial.println(WiFi.macAddress()); // Get and print the MAC address
   if (tryLoadConfig()) {
     if(!tryConnectWifi()) {
       handleConfigSetup();
