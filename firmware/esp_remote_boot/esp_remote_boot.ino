@@ -30,6 +30,7 @@ void triggerButtonPress();
 uint8_t getState();
 
 void setup() {
+  
   pinMode(STATE_PIN, INPUT);
   pinMode(BUTTON_PIN, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
